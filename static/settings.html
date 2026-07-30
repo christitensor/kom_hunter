@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KOM Hunter - Settings</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 620px; margin: 0 auto; padding: 24px 16px 64px;
+    background: #0f1115; color: #e8e8ea;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  a.back { color: #7fb2ff; text-decoration: none; font-size: 0.9rem; }
+  .card {
+    background: #171922; border: 1px solid #262933; border-radius: 12px;
+    padding: 18px 20px; margin: 20px 0;
+  }
+  .card h2 { margin: 0 0 6px; font-size: 1.05rem; }
+  .status {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem;
+    padding: 3px 10px; border-radius: 999px; margin-bottom: 12px;
+  }
+  .status.ok { background: #1e3324; color: #8fd97f; }
+  .status.pending { background: #33301e; color: #ffd27f; }
+  label { display: block; font-size: 0.85rem; color: #9a9aa4; margin: 12px 0 4px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #2c2f38;
+    background: #1a1c23; color: #e8e8ea; font-size: 0.95rem;
+  }
+  button {
+    padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer;
+    background: #fc5200; color: white; font-weight: 600; font-size: 0.9rem; margin-top: 14px;
+  }
+  button.secondary { background: #2c2f38; color: #e8e8ea; }
+  button:disabled { opacity: 0.5; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .help { color: #6b6b76; font-size: 0.82rem; margin-top: 6px; line-height: 1.5; }
+  .chat-option {
+    display: block; width: 100%; text-align: left; background: #1a1c23; border: 1px solid #2c2f38;
+    color: #e8e8ea; border-radius: 8px; padding: 10px 12px; margin-top: 8px; cursor: pointer; font-size: 0.9rem;
+  }
+  .chat-option.selected { border-color: #fc5200; background: #241a15; }
+  .msg { font-size: 0.85rem; margin-top: 10px; }
+  .msg.error { color: #ff8a8a; }
+  .msg.ok { color: #8fd97f; }
+</style>
+</head>
+<body>
+  <a class="back" href="/">&larr; Back to segments</a>
+  <h1>Settings</h1>
+
+  <div class="card">
+    <h2>Strava</h2>
+    <div id="strava-status" class="status pending">checking...</div>
+    <div id="strava-msg"></div>
+
+    <label for="strava-client-id">Client ID</label>
+    <input type="text" id="strava-client-id" placeholder="123456">
+    <label for="strava-client-secret">Client Secret</label>
+    <input type="password" id="strava-client-secret" placeholder="paste your client secret">
+    <div class="help">
+      Create an API app at <b>strava.com/settings/api</b>. Set "Authorization Callback Domain" to
+      <code id="callback-domain">this site's domain</code> (no https://, no trailing slash).
+    </div>
+    <div class="row">
+      <button id="save-strava">Save</button>
+      <button class="secondary" id="connect-strava">Connect to Strava</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Telegram</h2>
+    <div id="telegram-status" class="status pending">checking...</div>
+    <div id="telegram-msg"></div>
+
+    <label for="telegram-token">Bot token</label>
+    <input type="password" id="telegram-token" placeholder="123456:ABC-DEF...">
+    <div class="help">
+      Message <b>@BotFather</b> on Telegram, <code>/newbot</code>, paste the token it gives you here.
+      Then send your new bot any message (e.g. "hi") so it can see your chat.
+    </div>
+    <div class="row">
+      <button id="save-telegram">Save token</button>
+      <button class="secondary" id="refresh-chats">Find my chat</button>
+    </div>
+    <div id="chat-list"></div>
+    <button class="secondary" id="send-test" style="display:none">Send test message</button>
+  </div>
+
+<script>
+async function api(path, opts) {
+  const resp = await fetch(path, opts);
+  const isJson = resp.headers.get('content-type')?.includes('application/json');
+  const body = isJson ? await resp.json() : null;
+  if (!resp.ok) throw new Error(body?.detail || `Request failed (${resp.status})`);
+  return body;
+}
+
+document.getElementById('callback-domain').textContent = location.host;
+
+const params = new URLSearchParams(location.search);
+if (params.get('strava_connected')) {
+  showMsg('strava-msg', 'Strava connected!', 'ok');
+}
+if (params.get('strava_error')) {
+  showMsg('strava-msg', 'Strava error: ' + params.get('strava_error'), 'error');
+}
+
+function showMsg(id, text, cls) {
+  const el = document.getElementById(id);
+  el.innerHTML = `<div class="msg ${cls}">${text}</div>`;
+}
+
+function setStatus(id, ok, okText, pendingText) {
+  const el = document.getElementById(id);
+  el.className = 'status ' + (ok ? 'ok' : 'pending');
+  el.textContent = ok ? okText : pendingText;
+}
+
+async function loadStatus() {
+  const s = await api('/api/settings');
+  document.getElementById('strava-client-id').value = s.strava_client_id;
+  setStatus('strava-status', s.strava_connected, '✓ Connected', s.strava_has_secret ? 'Not connected yet -- tap Connect' : 'Not set up');
+  document.getElementById('connect-strava').disabled = !s.strava_has_secret;
+
+  document.getElementById('telegram-token').value = s.telegram_bot_token;
+  setStatus('telegram-status', s.telegram_connected, `✓ Connected (chat ${s.telegram_chat_id})`, s.telegram_bot_token ? 'Token saved -- tap Find my chat' : 'Not set up');
+  document.getElementById('send-test').style.display = s.telegram_connected ? 'inline-block' : 'none';
+}
+
+document.getElementById('save-strava').addEventListener('click', async () => {
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        strava_client_id: document.getElementById('strava-client-id').value,
+        strava_client_secret: document.getElementById('strava-client-secret').value,
+      }),
+    });
+    showMsg('strava-msg', 'Saved.', 'ok');
+    await loadStatus();
+  } catch (e) { showMsg('strava-msg', e.message, 'error'); }
+});
+
+document.getElementById('connect-strava').addEventListener('click', () => {
+  location.href = '/auth/strava/start';
+});
+
+document.getElementById('save-telegram').addEventListener('click', async () => {
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegram_bot_token: document.getElementById('telegram-token').value }),
+    });
+    showMsg('telegram-msg', 'Saved. Now message your bot on Telegram, then tap "Find my chat".', 'ok');
+    await loadStatus();
+  } catch (e) { showMsg('telegram-msg', e.message, 'error'); }
+});
+
+document.getElementById('refresh-chats').addEventListener('click', async () => {
+  const list = document.getElementById('chat-list');
+  list.innerHTML = 'Looking...';
+  try {
+    const chats = await api('/api/telegram/chats');
+    list.innerHTML = '';
+    chats.forEach(c => {
+      const btn = document.createElement('button');
+      btn.className = 'chat-option';
+      btn.textContent = `${c.name} (${c.type})`;
+      btn.addEventListener('click', async () => {
+        await api('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telegram_chat_id: c.chat_id }),
+        });
+        showMsg('telegram-msg', `Chat set to ${c.name}.`, 'ok');
+        await loadStatus();
+      });
+      list.appendChild(btn);
+    });
+  } catch (e) {
+    list.innerHTML = '';
+    showMsg('telegram-msg', e.message, 'error');
+  }
+});
+
+document.getElementById('send-test').addEventListener('click', async () => {
+  try {
+    await api('/api/telegram/test', { method: 'POST' });
+    showMsg('telegram-msg', 'Test message sent -- check Telegram.', 'ok');
+  } catch (e) { showMsg('telegram-msg', e.message, 'error'); }
+});
+
+loadStatus().catch(e => showMsg('strava-msg', e.message, 'error'));
+</script>
+</body>
+</html>

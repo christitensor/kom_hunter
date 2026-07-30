@@ -48,11 +48,20 @@
   .empty { color: #6b6b76; font-size: 0.9rem; }
   .error { color: #ff8a8a; font-size: 0.9rem; margin-bottom: 16px; }
   .inactive { opacity: 0.5; }
+  .banner {
+    background: #33301e; color: #ffd27f; border-radius: 10px; padding: 10px 14px;
+    font-size: 0.85rem; margin-bottom: 20px;
+  }
+  .banner a { color: inherit; font-weight: 600; }
 </style>
 </head>
 <body>
-  <h1>🚴 KOM Hunter</h1>
+  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+    <h1>🚴 KOM Hunter</h1>
+    <a href="/settings" style="color:#7fb2ff; text-decoration:none; font-size:0.9rem; padding-top:4px;">Settings</a>
+  </div>
   <div class="subtitle">Paste a Strava segment link. When the forecast shows a peak, outlier tailwind, you'll get a Telegram ping.</div>
+  <div id="setup-banner"></div>
 
   <form id="add-form">
     <input type="text" id="url-input" placeholder="https://www.strava.com/segments/12345678" required>
@@ -183,7 +192,19 @@ listEl.addEventListener('click', async (e) => {
   }
 });
 
+async function checkSetup() {
+  try {
+    const s = await api('/api/settings');
+    const banner = document.getElementById('setup-banner');
+    if (!s.strava_connected || !s.telegram_connected) {
+      const missing = [!s.strava_connected && 'Strava', !s.telegram_connected && 'Telegram'].filter(Boolean).join(' and ');
+      banner.innerHTML = `<div class="banner">${missing} not connected yet -- head to <a href="/settings">Settings</a> to finish setup before tracking segments.</div>`;
+    }
+  } catch (e) { /* non-fatal */ }
+}
+
 refresh().catch(e => showError(e.message));
+checkSetup();
 </script>
 </body>
 </html>

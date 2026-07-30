@@ -12,7 +12,7 @@ def add_segment(db: Session, url_or_id: str) -> Segment:
     if existing:
         return existing
 
-    data = strava.fetch_segment(segment_id)
+    data = strava.fetch_segment(db, segment_id)
 
     start_lat, start_lng = data["start_latlng"]
     end_lat, end_lng = data["end_latlng"]

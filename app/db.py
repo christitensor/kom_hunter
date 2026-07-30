@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import create_engine, Boolean, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-from app.config import DATABASE_URL
+from app.config import DATABASE_URL, ENGINE_KWARGS
 
 
 class Base(DeclarativeBase):
@@ -59,9 +59,41 @@ class Notification(Base):
     __table_args__ = (UniqueConstraint("segment_id", "forecast_time", name="uq_notification_window"),)
 
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+class AppSettings(Base):
+    """Singleton row (id=1) holding credentials, editable from the /settings page.
+
+    Kept in the DB rather than env vars so the whole setup flow -- connecting
+    Strava, wiring up Telegram -- can happen by tapping around the deployed
+    site instead of touching a hosting dashboard.
+    """
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    strava_client_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    strava_client_secret: Mapped[str | None] = mapped_column(String, nullable=True)
+    strava_access_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    strava_refresh_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    strava_token_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    telegram_bot_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    telegram_chat_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+engine = create_engine(DATABASE_URL, **ENGINE_KWARGS)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+
+
+def get_settings(db) -> AppSettings:
+    settings = db.get(AppSettings, 1)
+    if settings is None:
+        settings = AppSettings(id=1)
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings

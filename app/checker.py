@@ -50,7 +50,7 @@ def check_segment(db: Session, segment: Segment) -> list[analysis.PeakWindow]:
             continue
 
         try:
-            telegram.send_message(telegram.format_peak_alert(segment.name, segment.url, w))
+            telegram.send_message(db, telegram.format_peak_alert(segment.name, segment.url, w))
         except Exception:
             logger.exception("Failed to send Telegram alert for segment %s", segment.id)
             continue

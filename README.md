@@ -29,76 +29,91 @@ Track as many segments as you want at once.
      KOM day even if the tailwind number is big -- it's just unrideable).
    - Rain chance <= 30% (wet pavement erases any aero gain).
 5. Only the single best qualifying hour per day per segment gets alerted,
-   and each forecast timestamp is only ever alerted once (deduped in
-   SQLite), so you get a heads-up, not a flood.
+   and each forecast timestamp is only ever alerted once (deduped in the
+   database), so you get a heads-up, not a flood.
 
 This is a physically-reasoned heuristic, not a full aero/power simulation --
 it doesn't know your CdA, weight, or power curve. It answers "is the wind
 about to swing to your advantage in a way that's actually unusual and
 actually safe/dry," which is the useful trigger for going and hunting a KOM.
 
-## Setup
+## Deploying (Vercel, no CLI needed)
+
+The whole setup -- connecting Strava, wiring up Telegram -- happens from the
+`/settings` page in the running app, from any browser (phone included). You
+only need three things done in the Vercel dashboard first:
+
+1. Deploy this project to Vercel (as a new project).
+2. In the project's **Storage** tab, add a **Postgres** database (the Neon
+   integration) and connect it -- this replaces local SQLite, since
+   serverless functions don't keep a persistent disk. Free tier is enough.
+3. In **Settings -> Environment Variables**, add `CRON_SECRET` set to any
+   random string, then redeploy. This is what the scheduled weather check
+   authenticates with; Vercel automatically sends it back as the `Cron`
+   job's Authorization header, so the app just has to check it matches.
+
+Then, in the deployed site itself:
+
+4. Open `https://<your-project>.vercel.app/settings`.
+5. Create a Strava API app at **strava.com/settings/api**. Set its
+   "Authorization Callback Domain" to your Vercel domain (no `https://`, no
+   trailing slash -- the settings page shows you the exact value). Paste the
+   Client ID and Secret into the Strava card, hit Save, then **Connect to
+   Strava** and authorize.
+6. Message **@BotFather** on Telegram, `/newbot`, paste the token it gives
+   you into the Telegram card, hit **Save token**. Send your new bot any
+   message (e.g. "hi"), then hit **Find my chat** and pick yourself from the
+   list. Use **Send test message** to confirm it reaches you.
+7. Back on the home page, paste a Strava segment URL and hit Track.
+
+A Vercel Cron Job hits `/api/cron/check-segments` on a schedule (every 3
+hours by default, in `vercel.json`) and Telegrams you when a tracked
+segment's forecast shows a peak tailwind window in the next
+`FORECAST_DAYS` (7 by default).
+
+> Vercel's Hobby (free) plan may restrict how often Cron Jobs can run --
+> if the 3-hour schedule in `vercel.json` gets rejected at deploy time,
+> drop it to once a day (`"schedule": "0 14 * * *"`, adjust the hour to
+> whenever you want the check to run) or upgrade to Pro for finer control.
+
+## Running it yourself instead (VPS, Railway, home server, etc.)
+
+The same codebase runs as a normal always-on process -- no Vercel-specific
+pieces required:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-```
-
-### 1. Strava API credentials
-
-1. Create an API app at https://www.strava.com/settings/api (Authorization
-   Callback Domain: `localhost`). Note the Client ID and Client Secret.
-2. Get a refresh token:
-   ```bash
-   STRAVA_CLIENT_ID=xxxx STRAVA_CLIENT_SECRET=yyyy python scripts/get_strava_token.py
-   ```
-   It opens a browser for you to authorize, then prints the three values to
-   put in `.env`.
-
-### 2. Telegram bot
-
-1. Message [@BotFather](https://t.me/BotFather) on Telegram, `/newbot`, copy
-   the token into `.env` as `TELEGRAM_BOT_TOKEN`.
-2. Send your new bot any message (e.g. "hi") so it can see your chat.
-3. Run:
-   ```bash
-   TELEGRAM_BOT_TOKEN=xxxx python scripts/get_telegram_chat_id.py
-   ```
-   Copy the printed `chat_id` into `.env` as `TELEGRAM_CHAT_ID`.
-
-### 3. Run it
-
-```bash
 uvicorn app.main:app --reload
 ```
 
-Open http://localhost:8000, paste a segment URL (e.g.
-`https://www.strava.com/segments/12345678`), click Track. The app polls
-every `CHECK_INTERVAL_HOURS` (default 3) in the background and Telegrams you
-when a peak window shows up in the next `FORECAST_DAYS` (default 7).
-
-Each tracked segment card shows its current forecasted peak windows, and has
-buttons to check it immediately, pause/resume, or stop tracking it.
+Without a `DATABASE_URL` env var it falls back to a local SQLite file, and
+without `VERCEL` set it starts an in-process APScheduler loop instead of
+relying on Vercel Cron. Everything else -- connecting Strava and Telegram --
+still happens at `http://localhost:8000/settings`.
 
 ## Project layout
 
 ```
+api/index.py      Vercel entrypoint (re-exports the FastAPI app)
+vercel.json       Cron schedule, rewrites, function config
 app/
-  main.py        FastAPI app: /api/segments CRUD, forecast preview, manual check
-  segments.py     Add-segment flow: parse URL -> fetch from Strava -> geometry -> save
-  strava.py       OAuth token refresh + segment fetch
-  weather.py      Open-Meteo forecast + historical baseline client
-  wind.py         Bearing/tailwind/crosswind math, wind-sensitivity heuristic
-  analysis.py     Peak-window scoring against the local baseline
-  telegram.py     Alert formatting + sendMessage
-  checker.py      Ties it together per segment; dedupes via the notifications table
-  scheduler.py    APScheduler background poll job
-  db.py           SQLite models (Segment, Notification)
-static/index.html Single-page UI
-scripts/          One-off OAuth/chat-id helper scripts
-tests/            pytest unit tests for the wind math and peak-detection logic
+  main.py          FastAPI app: segment CRUD, /settings API, OAuth callback, cron endpoint
+  segments.py       Add-segment flow: parse URL -> fetch from Strava -> geometry -> save
+  strava.py         OAuth authorize/callback + token refresh + segment fetch (DB-backed creds)
+  weather.py        Open-Meteo forecast + historical baseline client
+  wind.py           Bearing/tailwind/crosswind math, wind-sensitivity heuristic
+  analysis.py       Peak-window scoring against the local baseline
+  telegram.py       Alert formatting, sendMessage, chat discovery (DB-backed creds)
+  checker.py        Ties it together per segment; dedupes via the notifications table
+  scheduler.py      APScheduler background loop (self-hosted only; unused on Vercel)
+  db.py             SQLAlchemy models: Segment, Notification, AppSettings
+static/
+  index.html         Segment list + add form
+  settings.html      Connect Strava / Telegram from the browser
+tests/              pytest unit tests for the wind math and peak-detection logic
 ```
 
 ## Tests

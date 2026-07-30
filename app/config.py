@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,15 +12,27 @@ def _int_env(name: str, default: int) -> int:
     return int(raw)
 
 
-STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
-STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
-STRAVA_REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN", "")
+# True when running as a Vercel serverless function (Vercel sets this itself).
+IS_VERCEL = bool(os.getenv("VERCEL"))
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# Checked against Vercel Cron's Authorization header on /api/cron/check-segments.
+CRON_SECRET = os.getenv("CRON_SECRET", "")
 
 CHECK_INTERVAL_HOURS = _int_env("CHECK_INTERVAL_HOURS", 3)
 FORECAST_DAYS = _int_env("FORECAST_DAYS", 7)
 
-DATABASE_PATH = os.getenv("DATABASE_PATH", "./kom_hunter.db")
-DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+# Local dev / self-hosted default: a SQLite file next to the project.
+# On Vercel, DATABASE_URL is injected by the Neon (Postgres) storage integration.
+_raw_database_url = os.getenv("DATABASE_URL")
+
+if _raw_database_url:
+    # Neon/most providers hand out "postgres://" or "postgresql://"; SQLAlchemy
+    # needs an explicit driver so it picks psycopg (installed via requirements.txt).
+    DATABASE_URL = _raw_database_url.replace("postgres://", "postgresql+psycopg://", 1).replace(
+        "postgresql://", "postgresql+psycopg://", 1
+    )
+    ENGINE_KWARGS = {"pool_pre_ping": True}
+else:
+    DATABASE_PATH = os.getenv("DATABASE_PATH", "./kom_hunter.db")
+    DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+    ENGINE_KWARGS = {"connect_args": {"check_same_thread": False}}

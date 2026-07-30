@@ -2,29 +2,40 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import analysis, checker, segments, weather
-from app.config import FORECAST_DAYS
-from app.db import Segment, SessionLocal, init_db
-from app.scheduler import start_scheduler, stop_scheduler
+from app import analysis, checker, segments, strava, telegram, weather
+from app.config import CRON_SECRET, FORECAST_DAYS, IS_VERCEL
+from app.db import AppSettings, Segment, SessionLocal, get_settings, init_db
 from app.strava import StravaError
 from app.weather import WeatherError
 
 logging.basicConfig(level=logging.INFO)
 
+_scheduler_handle = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    start_scheduler()
+    global _scheduler_handle
+    if not IS_VERCEL:
+        # Serverless deployments use a Vercel Cron hitting /api/cron/check-segments
+        # instead; an in-process background loop wouldn't survive between
+        # invocations there anyway.
+        from app.scheduler import start_scheduler
+
+        _scheduler_handle = start_scheduler()
     yield
-    stop_scheduler()
+    if _scheduler_handle is not None:
+        from app.scheduler import stop_scheduler
+
+        stop_scheduler()
 
 
 app = FastAPI(title="KOM Hunter", lifespan=lifespan)
@@ -40,6 +51,16 @@ def get_db():
 
 class AddSegmentRequest(BaseModel):
     url: str
+
+
+class SettingsUpdate(BaseModel):
+    strava_client_id: str | None = None
+    strava_client_secret: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+
+
+# ---- segments ----------------------------------------------------------
 
 
 @app.get("/api/segments")
@@ -113,6 +134,112 @@ def run_check_now(segment_id: int, db: Session = Depends(get_db)):
     return {"new_alerts_sent": len(new_alerts), "windows": [w.__dict__ for w in new_alerts]}
 
 
+# ---- settings / connecting Strava & Telegram ---------------------------
+
+
+def _settings_status(db: Session, s: AppSettings) -> dict:
+    return {
+        "strava_client_id": s.strava_client_id or "",
+        "strava_has_secret": bool(s.strava_client_secret),
+        "strava_connected": bool(s.strava_refresh_token),
+        "telegram_bot_token": s.telegram_bot_token or "",
+        "telegram_chat_id": s.telegram_chat_id or "",
+        "telegram_connected": bool(s.telegram_bot_token and s.telegram_chat_id),
+    }
+
+
+@app.get("/api/settings")
+def read_settings(db: Session = Depends(get_db)):
+    return _settings_status(db, get_settings(db))
+
+
+@app.post("/api/settings")
+def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
+    s = get_settings(db)
+    if body.strava_client_id is not None:
+        s.strava_client_id = body.strava_client_id.strip() or None
+    if body.strava_client_secret is not None:
+        s.strava_client_secret = body.strava_client_secret.strip() or None
+    if body.telegram_bot_token is not None:
+        s.telegram_bot_token = body.telegram_bot_token.strip() or None
+    if body.telegram_chat_id is not None:
+        s.telegram_chat_id = body.telegram_chat_id.strip() or None
+    db.commit()
+    return _settings_status(db, s)
+
+
+@app.get("/auth/strava/start")
+def strava_auth_start(request: Request, db: Session = Depends(get_db)):
+    redirect_uri = str(request.base_url).rstrip("/") + "/auth/strava/callback"
+    try:
+        url = strava.build_authorize_url(db, redirect_uri)
+    except StravaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return RedirectResponse(url)
+
+
+@app.get("/auth/strava/callback")
+def strava_auth_callback(request: Request, db: Session = Depends(get_db)):
+    error = request.query_params.get("error")
+    if error:
+        return RedirectResponse(f"/settings?strava_error={error}")
+
+    code = request.query_params.get("code")
+    if not code:
+        return RedirectResponse("/settings?strava_error=missing_code")
+
+    try:
+        strava.exchange_code_for_tokens(db, code)
+    except StravaError as e:
+        return RedirectResponse(f"/settings?strava_error={e}")
+    return RedirectResponse("/settings?strava_connected=1")
+
+
+@app.get("/api/telegram/chats")
+def telegram_chats(db: Session = Depends(get_db)):
+    s = get_settings(db)
+    if not s.telegram_bot_token:
+        raise HTTPException(status_code=400, detail="Save your Telegram bot token first.")
+    try:
+        chats = telegram.list_recent_chats(s.telegram_bot_token)
+    except telegram.TelegramError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not chats:
+        raise HTTPException(
+            status_code=404,
+            detail="No messages found yet. Send your bot any message on Telegram, then tap refresh again.",
+        )
+    return chats
+
+
+@app.post("/api/telegram/test")
+def telegram_test(db: Session = Depends(get_db)):
+    try:
+        telegram.send_message(db, "✅ KOM Hunter is connected. You'll hear from me when a peak tailwind shows up.")
+    except telegram.TelegramError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+# ---- cron (Vercel Cron calls this on a schedule) ------------------------
+
+
+@app.get("/api/cron/check-segments")
+def cron_check_segments(request: Request, db: Session = Depends(get_db)):
+    if CRON_SECRET:
+        auth = request.headers.get("authorization", "")
+        if auth != f"Bearer {CRON_SECRET}":
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    results = checker.check_all_segments(db)
+    return {
+        "segments_checked": len(results),
+        "alerts_sent": sum(len(w) for w in results.values()),
+    }
+
+
+# ---- static pages --------------------------------------------------------
+
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -121,3 +248,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/settings")
+def settings_page():
+    return FileResponse(STATIC_DIR / "settings.html")
