@@ -17,10 +17,17 @@ Track as many segments as you want at once.
    long segments are aero/wind dominated; steep, short climbs are
    gravity-dominated and care less about wind. This scales the alert's
    framing, not just a hard on/off.
-3. **Local baseline.** Pulls ~60 days of actual historical wind for the
-   segment's location (Open-Meteo Archive API) and computes the mean/stdev
-   of the tailwind component there.
-4. **Peak detection.** A forecast hour only qualifies if *all* of:
+3. **Ride window.** Both the forecast candidates and the "typical wind"
+   baseline itself are restricted to `RIDE_WINDOW_START_HOUR`-
+   `RIDE_WINDOW_END_HOUR` local time (default 4pm-8pm, set via env vars) --
+   only hours you can actually go ride matter, and "typical" means typical
+   for an evening ride, not diluted by calm overnight hours that were never
+   going to factor into an attempt anyway.
+4. **Local baseline.** Pulls ~60 days of actual historical wind for the
+   segment's location (Open-Meteo Archive API, ride-window hours only) and
+   computes the mean/stdev of the tailwind component there.
+5. **Peak detection.** A forecast hour only qualifies if *all* of:
+   - Falls within the ride window above.
    - Tailwind component >= 10 mph **and** >= 1.25 standard deviations above
      that location's own typical wind (so "peak" is relative to the spot,
      not a global constant, and a merely typical or light breeze never
@@ -28,7 +35,7 @@ Track as many segments as you want at once.
    - Sustained wind <= 28 mph and gusts <= 38 mph (a gale is not a "good"
      KOM day even if the tailwind number is big -- it's just unrideable).
    - Rain chance <= 30% (wet pavement erases any aero gain).
-5. Only the single best qualifying hour per day per segment gets alerted,
+6. Only the single best qualifying hour per day per segment gets alerted,
    and each forecast timestamp is only ever alerted once (deduped in the
    database), so you get a heads-up, not a flood.
 

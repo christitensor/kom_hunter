@@ -10,6 +10,12 @@ an arbitrary global constant, using a rolling ~60 day local baseline:
   - Sustained wind/gusts are capped for rideability/safety -- a dangerous
     gale is not a "good" KOM day even if the tailwind component is huge.
   - Rain is excluded -- wet pavement erases any aero gain.
+
+Both the forecast candidates and the baseline itself are restricted to
+RIDE_WINDOW_START_HOUR-RIDE_WINDOW_END_HOUR (local time), since only hours
+you can actually go ride matter -- and "typical" should mean typical for an
+evening ride, not diluted by calm overnight/early-morning hours that were
+never going to factor into a KOM attempt anyway.
 """
 
 import statistics
@@ -17,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app import wind
+from app.config import RIDE_WINDOW_END_HOUR, RIDE_WINDOW_START_HOUR
 from app.weather import HourlyReading
 
 MIN_TAILWIND_MPH = 10.0
@@ -24,6 +31,10 @@ MIN_Z_SCORE = 1.25
 MAX_SAFE_WIND_MPH = 28.0
 MAX_SAFE_GUST_MPH = 38.0
 MAX_PRECIP_PROBABILITY = 30.0
+
+
+def _in_ride_window(reading: HourlyReading) -> bool:
+    return RIDE_WINDOW_START_HOUR <= reading.time.hour < RIDE_WINDOW_END_HOUR
 
 
 @dataclass
@@ -42,7 +53,11 @@ class PeakWindow:
 
 
 def _baseline_stats(readings: list[HourlyReading], bearing_deg: float) -> tuple[float, float]:
-    values = [wind.tailwind_component(r.wind_speed_mph, r.wind_from_deg, bearing_deg) for r in readings]
+    values = [
+        wind.tailwind_component(r.wind_speed_mph, r.wind_from_deg, bearing_deg)
+        for r in readings
+        if _in_ride_window(r)
+    ]
     if len(values) < 10:
         return 0.0, 1.0  # not enough history to be meaningful; z-score becomes ~raw value
     mean = statistics.fmean(values)
@@ -60,6 +75,9 @@ def find_peak_windows(
 
     windows: list[PeakWindow] = []
     for r in forecast:
+        if not _in_ride_window(r):
+            continue
+
         tailwind = wind.tailwind_component(r.wind_speed_mph, r.wind_from_deg, bearing_deg)
         z = (tailwind - baseline_mean) / baseline_std
 

@@ -5,7 +5,9 @@ from app.weather import HourlyReading
 
 # Segment travels due north (bearing 0), so a pure tailwind is wind FROM the south (180).
 BEARING = 0.0
-BASE_TIME = datetime(2026, 8, 1, 12, 0)
+# 3pm, so hours_ahead of 1-3 (used throughout below) land at 4-6pm -- inside
+# the default 4pm-8pm ride window analysis.py now restricts everything to.
+BASE_TIME = datetime(2026, 8, 1, 15, 0)
 
 
 def make_baseline(n=24 * 60, speed=5.0, from_deg=180.0):
@@ -84,6 +86,21 @@ def test_low_wind_sensitivity_reduces_score_but_can_still_qualify():
     low_sens = analysis.find_peak_windows(forecast, baseline, BEARING, wind_sensitivity=0.2)
     assert high_sens[0].peak_score >= low_sens[0].peak_score
     assert "steep/technical" in low_sens[0].reason
+
+
+def test_outside_ride_window_never_qualifies_even_if_perfect():
+    # 9am -- a great tailwind, but not a rideable hour, so it shouldn't show up.
+    baseline = make_baseline(speed=5.0, from_deg=180.0)
+    morning = HourlyReading(
+        time=datetime(2026, 8, 1, 9, 0),
+        wind_speed_mph=20.0,
+        wind_from_deg=180.0,
+        wind_gust_mph=23.0,
+        precipitation_probability=0,
+        temperature_f=65,
+    )
+    windows = analysis.find_peak_windows([morning], baseline, BEARING, wind_sensitivity=1.0)
+    assert windows == []
 
 
 def test_results_sorted_best_first():
