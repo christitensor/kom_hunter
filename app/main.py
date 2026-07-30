@@ -267,8 +267,8 @@ def telegram_test(db: Session = Depends(get_db), _auth: None = Depends(auth.requ
 @app.get("/api/cron/check-segments")
 def cron_check_segments(request: Request, db: Session = Depends(get_db)):
     if CRON_SECRET:
-        auth = request.headers.get("authorization", "")
-        if auth != f"Bearer {CRON_SECRET}":
+        auth_header = request.headers.get("authorization", "")
+        if auth_header != f"Bearer {CRON_SECRET}":
             raise HTTPException(status_code=401, detail="Unauthorized")
 
     results = checker.check_all_segments(db)
