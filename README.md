@@ -66,15 +66,14 @@ Then, in the deployed site itself:
    list. Use **Send test message** to confirm it reaches you.
 7. Back on the home page, paste a Strava segment URL and hit Track.
 
-A Vercel Cron Job hits `/api/cron/check-segments` on a schedule (every 3
-hours by default, in `vercel.json`) and Telegrams you when a tracked
-segment's forecast shows a peak tailwind window in the next
-`FORECAST_DAYS` (7 by default).
+A Vercel Cron Job hits `/api/cron/check-segments` once a day (`vercel.json`,
+`0 14 * * *` = 2pm UTC by default -- change the hour to whenever you want it
+to run) and Telegrams you when a tracked segment's forecast shows a peak
+tailwind window in the next `FORECAST_DAYS` (7 by default).
 
-> Vercel's Hobby (free) plan may restrict how often Cron Jobs can run --
-> if the 3-hour schedule in `vercel.json` gets rejected at deploy time,
-> drop it to once a day (`"schedule": "0 14 * * *"`, adjust the hour to
-> whenever you want the check to run) or upgrade to Pro for finer control.
+> Vercel's Hobby (free) plan restricts Cron Jobs to once a day -- that's
+> what `vercel.json` is set to. Upgrade to Pro if you want it checking
+> more often than daily.
 
 ## Running it yourself instead (VPS, Railway, home server, etc.)
 

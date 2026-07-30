@@ -4,6 +4,6 @@
     "api/index.py": { "maxDuration": 60 }
   },
   "crons": [
-    { "path": "/api/cron/check-segments", "schedule": "0 */3 * * *" }
+    { "path": "/api/cron/check-segments", "schedule": "0 14 * * *" }
   ]
 }
