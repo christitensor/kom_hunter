@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KOM Hunter</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 780px; margin: 0 auto; padding: 24px 16px 64px;
+    background: #0f1115; color: #e8e8ea;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .subtitle { color: #9a9aa4; margin-bottom: 24px; font-size: 0.95rem; }
+  form { display: flex; gap: 8px; margin-bottom: 28px; }
+  input[type=text] {
+    flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #2c2f38;
+    background: #1a1c23; color: #e8e8ea; font-size: 0.95rem;
+  }
+  button {
+    padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer;
+    background: #fc5200; color: white; font-weight: 600; font-size: 0.95rem;
+  }
+  button.secondary { background: #2c2f38; color: #e8e8ea; }
+  button.danger { background: #3a1f1f; color: #ff8a8a; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .card {
+    background: #171922; border: 1px solid #262933; border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 16px;
+  }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .card h3 { margin: 0 0 4px; font-size: 1.05rem; }
+  .card h3 a { color: inherit; text-decoration: none; }
+  .card h3 a:hover { text-decoration: underline; }
+  .meta { color: #9a9aa4; font-size: 0.85rem; line-height: 1.6; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem;
+    background: #22304a; color: #7fb2ff; margin-right: 6px;
+  }
+  .badge.wind { background: #2a3f28; color: #8fd97f; }
+  .actions { display: flex; gap: 6px; }
+  .actions button { padding: 6px 10px; font-size: 0.8rem; }
+  .windows { margin-top: 12px; border-top: 1px solid #262933; padding-top: 10px; }
+  .window-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 4px 0; }
+  .window-row .score { color: #ffb454; }
+  .empty { color: #6b6b76; font-size: 0.9rem; }
+  .error { color: #ff8a8a; font-size: 0.9rem; margin-bottom: 16px; }
+  .inactive { opacity: 0.5; }
+</style>
+</head>
+<body>
+  <h1>🚴 KOM Hunter</h1>
+  <div class="subtitle">Paste a Strava segment link. When the forecast shows a peak, outlier tailwind, you'll get a Telegram ping.</div>
+
+  <form id="add-form">
+    <input type="text" id="url-input" placeholder="https://www.strava.com/segments/12345678" required>
+    <button type="submit" id="add-btn">Track</button>
+  </form>
+
+  <div id="error" class="error" style="display:none"></div>
+  <div id="list"></div>
+
+<script>
+const listEl = document.getElementById('list');
+const errorEl = document.getElementById('error');
+
+function showError(msg) {
+  errorEl.textContent = msg;
+  errorEl.style.display = 'block';
+  setTimeout(() => errorEl.style.display = 'none', 6000);
+}
+
+async function api(path, opts) {
+  const resp = await fetch(path, opts);
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body.detail || `Request failed (${resp.status})`);
+  }
+  return resp.json();
+}
+
+function fmtWindow(w) {
+  const t = new Date(w.time);
+  const when = t.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return `<div class="window-row"><span>${when} — ${w.reason}</span><span class="score">score ${w.peak_score}</span></div>`;
+}
+
+function segmentCard(s) {
+  const div = document.createElement('div');
+  div.className = 'card' + (s.active ? '' : ' inactive');
+  div.innerHTML = `
+    <div class="card-head">
+      <div>
+        <h3><a href="${s.url}" target="_blank" rel="noopener">${s.name}</a></h3>
+        <div class="meta">
+          ${s.distance_mi} mi &middot; ${s.average_grade}% avg grade &middot; ${s.elevation_gain_m.toFixed(0)} m gain<br>
+          <span class="badge">travels ${s.bearing_compass} (${s.bearing_deg}&deg;)</span>
+          <span class="badge wind">ideal wind FROM ${s.ideal_wind_from_compass} (${s.ideal_wind_from_deg}&deg;)</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="secondary" data-action="check" data-id="${s.id}">Check now</button>
+        <button class="secondary" data-action="toggle" data-id="${s.id}">${s.active ? 'Pause' : 'Resume'}</button>
+        <button class="danger" data-action="delete" data-id="${s.id}">Remove</button>
+      </div>
+    </div>
+    <div class="windows" id="windows-${s.id}"><span class="empty">Loading forecast…</span></div>
+  `;
+  return div;
+}
+
+async function loadForecast(segmentId) {
+  const container = document.getElementById(`windows-${segmentId}`);
+  try {
+    const data = await api(`/api/segments/${segmentId}/forecast`);
+    if (!data.peak_windows.length) {
+      container.innerHTML = '<span class="empty">No peak-tailwind windows in the forecast right now.</span>';
+    } else {
+      container.innerHTML = data.peak_windows.slice(0, 5).map(fmtWindow).join('');
+    }
+  } catch (e) {
+    container.innerHTML = `<span class="empty">Couldn't load forecast: ${e.message}</span>`;
+  }
+}
+
+async function refresh() {
+  const segs = await api('/api/segments');
+  listEl.innerHTML = '';
+  if (!segs.length) {
+    listEl.innerHTML = '<div class="empty">No segments tracked yet. Paste a link above to get started.</div>';
+    return;
+  }
+  for (const s of segs) {
+    const card = segmentCard(s);
+    listEl.appendChild(card);
+    loadForecast(s.id);
+  }
+}
+
+document.getElementById('add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('url-input');
+  const btn = document.getElementById('add-btn');
+  btn.disabled = true;
+  try {
+    await api('/api/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: input.value }),
+    });
+    input.value = '';
+    await refresh();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+listEl.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const action = btn.dataset.action;
+  btn.disabled = true;
+  try {
+    if (action === 'delete') {
+      if (!confirm('Stop tracking this segment?')) return;
+      await api(`/api/segments/${id}`, { method: 'DELETE' });
+    } else if (action === 'toggle') {
+      await api(`/api/segments/${id}/toggle`, { method: 'POST' });
+    } else if (action === 'check') {
+      const res = await api(`/api/segments/${id}/check`, { method: 'POST' });
+      alert(res.new_alerts_sent ? `Sent ${res.new_alerts_sent} Telegram alert(s).` : 'No new peak windows to alert on.');
+    }
+    await refresh();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+refresh().catch(e => showError(e.message));
+</script>
+</body>
+</html>
