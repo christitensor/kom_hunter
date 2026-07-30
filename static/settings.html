@@ -49,7 +49,10 @@
 </style>
 </head>
 <body>
-  <a class="back" href="/">&larr; Back to segments</a>
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <a class="back" href="/">&larr; Back to segments</a>
+    <a class="back" href="#" id="logout-link">Log out</a>
+  </div>
   <h1>Settings</h1>
 
   <div class="card">
@@ -93,6 +96,10 @@
 <script>
 async function api(path, opts) {
   const resp = await fetch(path, opts);
+  if (resp.status === 401) {
+    location.href = '/login';
+    throw new Error('Session expired, redirecting to login...');
+  }
   const isJson = resp.headers.get('content-type')?.includes('application/json');
   const body = isJson ? await resp.json() : null;
   if (!resp.ok) throw new Error(body?.detail || `Request failed (${resp.status})`);
@@ -194,6 +201,12 @@ document.getElementById('send-test').addEventListener('click', async () => {
     await api('/api/telegram/test', { method: 'POST' });
     showMsg('telegram-msg', 'Test message sent -- check Telegram.', 'ok');
   } catch (e) { showMsg('telegram-msg', e.message, 'error'); }
+});
+
+document.getElementById('logout-link').addEventListener('click', async (e) => {
+  e.preventDefault();
+  await fetch('/api/logout', { method: 'POST' });
+  location.href = '/login';
 });
 
 loadStatus().catch(e => showMsg('strava-msg', e.message, 'error'));

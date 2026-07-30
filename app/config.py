@@ -18,6 +18,10 @@ IS_VERCEL = bool(os.getenv("VERCEL"))
 # Checked against Vercel Cron's Authorization header on /api/cron/check-segments.
 CRON_SECRET = os.getenv("CRON_SECRET", "")
 
+# Gate for /settings and its API -- lets you share the segment tracker
+# without exposing your Strava/Telegram credentials to whoever has the link.
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
 CHECK_INTERVAL_HOURS = _int_env("CHECK_INTERVAL_HOURS", 3)
 FORECAST_DAYS = _int_env("FORECAST_DAYS", 7)
 

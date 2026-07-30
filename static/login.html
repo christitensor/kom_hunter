@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KOM Hunter - Login</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 420px; margin: 15vh auto 0; padding: 0 16px;
+    background: #0f1115; color: #e8e8ea;
+  }
+  h1 { font-size: 1.3rem; margin-bottom: 18px; text-align: center; }
+  input[type=password] {
+    width: 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid #2c2f38;
+    background: #1a1c23; color: #e8e8ea; font-size: 1rem; margin-bottom: 12px;
+  }
+  button {
+    width: 100%; padding: 12px 16px; border-radius: 8px; border: none; cursor: pointer;
+    background: #fc5200; color: white; font-weight: 600; font-size: 1rem;
+  }
+  .msg { color: #ff8a8a; font-size: 0.85rem; margin-top: 10px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>🚴 KOM Hunter Settings</h1>
+  <form id="login-form">
+    <input type="password" id="password" placeholder="Password" autofocus required>
+    <button type="submit">Log in</button>
+  </form>
+  <div id="msg" class="msg"></div>
+
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('msg');
+  msg.textContent = '';
+  try {
+    const resp = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: document.getElementById('password').value }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.detail || 'Login failed');
+    }
+    location.href = '/settings';
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+});
+</script>
+</body>
+</html>

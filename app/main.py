@@ -2,14 +2,14 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import analysis, checker, segments, strava, telegram, weather
+from app import analysis, auth, checker, segments, strava, telegram, weather
 from app.config import CRON_SECRET, FORECAST_DAYS, IS_VERCEL
 from app.db import AppSettings, Segment, SessionLocal, get_settings, init_db
 from app.strava import StravaError
@@ -58,6 +58,42 @@ class SettingsUpdate(BaseModel):
     strava_client_secret: str | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+# ---- login (gates /settings and its API) --------------------------------
+
+
+@app.post("/api/login")
+def login(body: LoginRequest, response: Response):
+    try:
+        ok = auth.check_password(body.password)
+    except auth.AuthNotConfigured:
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_PASSWORD isn't set on the server. Add it in Vercel's Environment Variables first.",
+        )
+    if not ok:
+        raise HTTPException(status_code=401, detail="Wrong password.")
+    response.set_cookie(
+        auth.COOKIE_NAME,
+        auth.make_cookie_value(),
+        max_age=60 * 60 * 24 * 180,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    return {"ok": True}
+
+
+@app.post("/api/logout")
+def logout(response: Response):
+    response.delete_cookie(auth.COOKIE_NAME, path="/")
+    return {"ok": True}
 
 
 # ---- segments ----------------------------------------------------------
@@ -149,12 +185,14 @@ def _settings_status(db: Session, s: AppSettings) -> dict:
 
 
 @app.get("/api/settings")
-def read_settings(db: Session = Depends(get_db)):
+def read_settings(db: Session = Depends(get_db), _auth: None = Depends(auth.require_auth)):
     return _settings_status(db, get_settings(db))
 
 
 @app.post("/api/settings")
-def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
+def update_settings(
+    body: SettingsUpdate, db: Session = Depends(get_db), _auth: None = Depends(auth.require_auth)
+):
     s = get_settings(db)
     if body.strava_client_id is not None:
         s.strava_client_id = body.strava_client_id.strip() or None
@@ -169,7 +207,7 @@ def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
 
 
 @app.get("/auth/strava/start")
-def strava_auth_start(request: Request, db: Session = Depends(get_db)):
+def strava_auth_start(request: Request, db: Session = Depends(get_db), _auth: None = Depends(auth.require_auth)):
     redirect_uri = str(request.base_url).rstrip("/") + "/auth/strava/callback"
     try:
         url = strava.build_authorize_url(db, redirect_uri)
@@ -179,7 +217,9 @@ def strava_auth_start(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/auth/strava/callback")
-def strava_auth_callback(request: Request, db: Session = Depends(get_db)):
+def strava_auth_callback(
+    request: Request, db: Session = Depends(get_db), _auth: None = Depends(auth.require_auth)
+):
     error = request.query_params.get("error")
     if error:
         return RedirectResponse(f"/settings?strava_error={error}")
@@ -196,7 +236,7 @@ def strava_auth_callback(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/api/telegram/chats")
-def telegram_chats(db: Session = Depends(get_db)):
+def telegram_chats(db: Session = Depends(get_db), _auth: None = Depends(auth.require_auth)):
     s = get_settings(db)
     if not s.telegram_bot_token:
         raise HTTPException(status_code=400, detail="Save your Telegram bot token first.")
@@ -213,7 +253,7 @@ def telegram_chats(db: Session = Depends(get_db)):
 
 
 @app.post("/api/telegram/test")
-def telegram_test(db: Session = Depends(get_db)):
+def telegram_test(db: Session = Depends(get_db), _auth: None = Depends(auth.require_auth)):
     try:
         telegram.send_message(db, "✅ KOM Hunter is connected. You'll hear from me when a peak tailwind shows up.")
     except telegram.TelegramError as e:
@@ -251,5 +291,12 @@ def index():
 
 
 @app.get("/settings")
-def settings_page():
+def settings_page(request: Request):
+    if not auth.is_authenticated(request):
+        return RedirectResponse("/login")
     return FileResponse(STATIC_DIR / "settings.html")
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse(STATIC_DIR / "login.html")

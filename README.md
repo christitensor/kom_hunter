@@ -51,20 +51,29 @@ only need three things done in the Vercel dashboard first:
    random string, then redeploy. This is what the scheduled weather check
    authenticates with; Vercel automatically sends it back as the `Cron`
    job's Authorization header, so the app just has to check it matches.
+4. In the same Environment Variables page, add `ADMIN_PASSWORD` set to a
+   password of your choosing, then redeploy. This gates `/settings` and its
+   API -- **required if you plan to share the app's main URL with anyone**,
+   since without it set, `/settings` refuses all access rather than
+   silently allowing it (fail closed).
 
 Then, in the deployed site itself:
 
-4. Open `https://<your-project>.vercel.app/settings`.
-5. Create a Strava API app at **strava.com/settings/api**. Set its
+5. Open `https://<your-project>.vercel.app/settings` and log in with the
+   `ADMIN_PASSWORD` you set.
+6. Create a Strava API app at **strava.com/settings/api**. Set its
    "Authorization Callback Domain" to your Vercel domain (no `https://`, no
    trailing slash -- the settings page shows you the exact value). Paste the
    Client ID and Secret into the Strava card, hit Save, then **Connect to
    Strava** and authorize.
-6. Message **@BotFather** on Telegram, `/newbot`, paste the token it gives
+7. Message **@BotFather** on Telegram, `/newbot`, paste the token it gives
    you into the Telegram card, hit **Save token**. Send your new bot any
    message (e.g. "hi"), then hit **Find my chat** and pick yourself from the
    list. Use **Send test message** to confirm it reaches you.
-7. Back on the home page, paste a Strava segment URL and hit Track.
+8. Back on the home page, paste a Strava segment URL and hit Track.
+
+The home page (segment list, forecasts) has no login and is safe to share --
+it doesn't expose any credentials. Only `/settings` and its API are gated.
 
 A Vercel Cron Job hits `/api/cron/check-segments` once a day (`vercel.json`,
 `0 14 * * *` = 2pm UTC by default -- change the hour to whenever you want it
