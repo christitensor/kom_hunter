@@ -67,7 +67,18 @@ def get_forecast(lat: float, lon: float, days: int) -> list[HourlyReading]:
     )
     if resp.status_code != 200:
         raise WeatherError(f"Open-Meteo forecast error {resp.status_code}: {resp.text}")
-    return _parse_hourly(resp.json())
+
+    payload = resp.json()
+    readings = _parse_hourly(payload)
+
+    # "hourly.time" values are in the location's local time (timezone=auto),
+    # so drop hours from earlier today using that same local clock -- an
+    # alert for a tailwind window that already passed isn't actionable.
+    utc_offset = payload.get("utc_offset_seconds", 0)
+    current_hour = (datetime.utcnow() + timedelta(seconds=utc_offset)).replace(
+        minute=0, second=0, microsecond=0
+    )
+    return [r for r in readings if r.time >= current_hour]
 
 
 def get_historical_baseline(lat: float, lon: float, lookback_days: int = 60) -> list[HourlyReading]:
