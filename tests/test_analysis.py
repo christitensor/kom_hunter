@@ -5,9 +5,9 @@ from app.weather import HourlyReading
 
 # Segment travels due north (bearing 0), so a pure tailwind is wind FROM the south (180).
 BEARING = 0.0
-# 3pm, so hours_ahead of 1-3 (used throughout below) land at 4-6pm -- inside
-# the default 4pm-8pm ride window analysis.py now restricts everything to.
-BASE_TIME = datetime(2026, 8, 1, 15, 0)
+# Monday 3pm, so hours_ahead of 1-3 (used throughout below) land at 4-6pm --
+# inside the default weekday 4pm-8pm ride window.
+BASE_TIME = datetime(2026, 8, 3, 15, 0)
 
 
 def make_baseline(n=24 * 60, speed=5.0, from_deg=180.0):
@@ -88,11 +88,11 @@ def test_low_wind_sensitivity_reduces_score_but_can_still_qualify():
     assert "steep/technical" in low_sens[0].reason
 
 
-def test_outside_ride_window_never_qualifies_even_if_perfect():
-    # 9am -- a great tailwind, but not a rideable hour, so it shouldn't show up.
+def test_outside_weekday_ride_window_never_qualifies_even_if_perfect():
+    # Monday 9am -- a great tailwind, but not a rideable weekday hour.
     baseline = make_baseline(speed=5.0, from_deg=180.0)
     morning = HourlyReading(
-        time=datetime(2026, 8, 1, 9, 0),
+        time=datetime(2026, 8, 3, 9, 0),  # Monday
         wind_speed_mph=20.0,
         wind_from_deg=180.0,
         wind_gust_mph=23.0,
@@ -100,6 +100,37 @@ def test_outside_ride_window_never_qualifies_even_if_perfect():
         temperature_f=65,
     )
     windows = analysis.find_peak_windows([morning], baseline, BEARING, wind_sensitivity=1.0)
+    assert windows == []
+
+
+def test_weekend_morning_qualifies_even_though_weekday_morning_does_not():
+    # Saturday 9am -- outside the weekday window, but inside the wider
+    # weekend window (default 8am-8pm), so this should qualify.
+    baseline = make_baseline(speed=5.0, from_deg=180.0)
+    saturday_morning = HourlyReading(
+        time=datetime(2026, 8, 1, 9, 0),  # Saturday
+        wind_speed_mph=20.0,
+        wind_from_deg=180.0,
+        wind_gust_mph=23.0,
+        precipitation_probability=0,
+        temperature_f=65,
+    )
+    windows = analysis.find_peak_windows([saturday_morning], baseline, BEARING, wind_sensitivity=1.0)
+    assert len(windows) == 1
+
+
+def test_weekend_late_night_still_excluded():
+    # Sunday 9pm -- past the weekend window's 8pm cutoff.
+    baseline = make_baseline(speed=5.0, from_deg=180.0)
+    sunday_night = HourlyReading(
+        time=datetime(2026, 8, 2, 21, 0),  # Sunday
+        wind_speed_mph=20.0,
+        wind_from_deg=180.0,
+        wind_gust_mph=23.0,
+        precipitation_probability=0,
+        temperature_f=65,
+    )
+    windows = analysis.find_peak_windows([sunday_night], baseline, BEARING, wind_sensitivity=1.0)
     assert windows == []
 
 

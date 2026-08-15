@@ -27,9 +27,12 @@ FORECAST_DAYS = _int_env("FORECAST_DAYS", 7)
 
 # Only hours you can actually go ride matter -- restricts peak-window
 # detection (and what counts as "typical" wind for the z-score baseline) to
-# this local-time window. Defaults to a 4pm-8pm ride window.
+# this local-time window. Weekday default 4pm-8pm; weekend default 8am-8pm
+# (Saturday/Sunday), since there's no after-work constraint on those days.
 RIDE_WINDOW_START_HOUR = _int_env("RIDE_WINDOW_START_HOUR", 16)
 RIDE_WINDOW_END_HOUR = _int_env("RIDE_WINDOW_END_HOUR", 20)
+WEEKEND_RIDE_WINDOW_START_HOUR = _int_env("WEEKEND_RIDE_WINDOW_START_HOUR", 8)
+WEEKEND_RIDE_WINDOW_END_HOUR = _int_env("WEEKEND_RIDE_WINDOW_END_HOUR", 20)
 
 # Local dev / self-hosted default: a SQLite file next to the project.
 # On Vercel, DATABASE_URL is injected by the Neon (Postgres) storage integration.

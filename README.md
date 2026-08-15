@@ -18,11 +18,13 @@ Track as many segments as you want at once.
    gravity-dominated and care less about wind. This scales the alert's
    framing, not just a hard on/off.
 3. **Ride window.** Both the forecast candidates and the "typical wind"
-   baseline itself are restricted to `RIDE_WINDOW_START_HOUR`-
-   `RIDE_WINDOW_END_HOUR` local time (default 4pm-8pm, set via env vars) --
-   only hours you can actually go ride matter, and "typical" means typical
-   for an evening ride, not diluted by calm overnight hours that were never
-   going to factor into an attempt anyway.
+   baseline itself are restricted to a local-time ride window -- only hours
+   you can actually go ride matter, and "typical" means typical for that
+   kind of ride, not diluted by hours that were never going to factor into
+   an attempt anyway. Weekdays and weekends use separate windows, set via
+   env vars: `RIDE_WINDOW_START_HOUR`/`RIDE_WINDOW_END_HOUR` (default
+   4pm-8pm, Mon-Fri) and `WEEKEND_RIDE_WINDOW_START_HOUR`/
+   `WEEKEND_RIDE_WINDOW_END_HOUR` (default 8am-8pm, Sat-Sun).
 4. **Local baseline.** Pulls ~60 days of actual historical wind for the
    segment's location (Open-Meteo Archive API, ride-window hours only) and
    computes the mean/stdev of the tailwind component there.

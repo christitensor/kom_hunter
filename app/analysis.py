@@ -11,11 +11,12 @@ an arbitrary global constant, using a rolling ~60 day local baseline:
     gale is not a "good" KOM day even if the tailwind component is huge.
   - Rain is excluded -- wet pavement erases any aero gain.
 
-Both the forecast candidates and the baseline itself are restricted to
-RIDE_WINDOW_START_HOUR-RIDE_WINDOW_END_HOUR (local time), since only hours
-you can actually go ride matter -- and "typical" should mean typical for an
-evening ride, not diluted by calm overnight/early-morning hours that were
-never going to factor into a KOM attempt anyway.
+Both the forecast candidates and the baseline itself are restricted to a
+ride window (local time), since only hours you can actually go ride matter
+-- and "typical" should mean typical for that kind of ride, not diluted by
+hours that were never going to factor into a KOM attempt anyway. Weekdays
+and weekends use separate windows (e.g. after-work on weekdays, all-day on
+weekends), matched by the forecast hour's own day of week.
 """
 
 import statistics
@@ -23,7 +24,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app import wind
-from app.config import RIDE_WINDOW_END_HOUR, RIDE_WINDOW_START_HOUR
+from app.config import (
+    RIDE_WINDOW_END_HOUR,
+    RIDE_WINDOW_START_HOUR,
+    WEEKEND_RIDE_WINDOW_END_HOUR,
+    WEEKEND_RIDE_WINDOW_START_HOUR,
+)
 from app.weather import HourlyReading
 
 MIN_TAILWIND_MPH = 10.0
@@ -34,7 +40,13 @@ MAX_PRECIP_PROBABILITY = 30.0
 
 
 def _in_ride_window(reading: HourlyReading) -> bool:
-    return RIDE_WINDOW_START_HOUR <= reading.time.hour < RIDE_WINDOW_END_HOUR
+    is_weekend = reading.time.weekday() >= 5  # Monday=0 ... Saturday=5, Sunday=6
+    start, end = (
+        (WEEKEND_RIDE_WINDOW_START_HOUR, WEEKEND_RIDE_WINDOW_END_HOUR)
+        if is_weekend
+        else (RIDE_WINDOW_START_HOUR, RIDE_WINDOW_END_HOUR)
+    )
+    return start <= reading.time.hour < end
 
 
 @dataclass
