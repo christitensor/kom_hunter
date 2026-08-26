@@ -115,21 +115,27 @@ still happens at `http://localhost:8000/settings`.
 
 ```
 api/index.py      Vercel entrypoint (re-exports the FastAPI app)
-vercel.json       Cron schedule, rewrites, function config
+vercel.json       Cron schedule, function config
 app/
-  main.py          FastAPI app: segment CRUD, /settings API, OAuth callback, cron endpoint
+  main.py          FastAPI app: segment CRUD, /settings API, OAuth callback, cron endpoint, login
+  auth.py          Cookie gate for /settings and its API
   segments.py       Add-segment flow: parse URL -> fetch from Strava -> geometry -> save
   strava.py         OAuth authorize/callback + token refresh + segment fetch (DB-backed creds)
   weather.py        Open-Meteo forecast + historical baseline client
   wind.py           Bearing/tailwind/crosswind math, wind-sensitivity heuristic
-  analysis.py       Peak-window scoring against the local baseline
+  analysis.py       Peak-window scoring against the local baseline, ride-window filtering
   telegram.py       Alert formatting, sendMessage, chat discovery (DB-backed creds)
   checker.py        Ties it together per segment; dedupes via the notifications table
   scheduler.py      APScheduler background loop (self-hosted only; unused on Vercel)
   db.py             SQLAlchemy models: Segment, Notification, AppSettings
 static/
   index.html         Segment list + add form
-  settings.html      Connect Strava / Telegram from the browser
+  settings.html      Connect Strava / Telegram from the browser (password-gated)
+  login.html         Password form for /settings
+  favicon.ico, favicon.svg, apple-touch-icon.png, icon-192.png, icon-512.png, manifest.webmanifest
+                      App icon (a crown, in Strava's brand orange) + PWA manifest
+scripts/
+  gen_icons.py       Regenerates the icon files above (run locally with Pillow; not a runtime dep)
 tests/              pytest unit tests for the wind math and peak-detection logic
 ```
 
