@@ -31,6 +31,11 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+# Public alias -- used outside this module to estimate distance between two
+# manually-entered points (e.g. when a segment is added without a polyline).
+haversine_m = _haversine_m
+
+
 @dataclass
 class RouteDirection:
     bearing_deg: float

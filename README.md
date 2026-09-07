@@ -1,18 +1,29 @@
 # KOM Hunter
 
-Paste a Strava segment link, and KOM Hunter figures out which wind direction
-would give you the biggest push on that segment, then watches the forecast
-for it. When conditions are a genuine outlier for that spot -- not just "a
-bit breezy" -- it pings you on Telegram so you can go time your attempt.
+Add a segment (paste a Strava link for a head start, or just fill in the
+form), and KOM Hunter figures out which wind direction would give you the
+biggest push on it, then watches the forecast for it. When conditions are a
+genuine outlier for that spot -- not just "a bit breezy" -- it pings you on
+Telegram so you can go time your attempt.
 
-Track as many segments as you want at once.
+Track as many segments as you want at once, grouped by city with
+notifications you can flip on or off for a whole area at a time.
+
+No Strava account or API app is required. Strava only shares a segment's
+exact route (the polyline) with a logged-in session, so rather than
+impersonate one, segments are added with two coordinates you read straight
+off any map -- the "Add segment" form has a click-to-pin map for that.
+Pasting a Strava link and hitting **Autofill** still saves typing for the
+rest (name, distance, grade, elevation, place) by reading Strava's public,
+no-login embed widget for that segment -- no API key, OAuth, or connected
+account involved.
 
 ## How it decides what's "peak"
 
-1. **Segment geometry.** Pulls the segment from the Strava API and computes
-   its distance-weighted dominant direction of travel from the route
-   polyline (not just start->end, so curvy segments are handled sensibly).
-   That gives the ideal wind-FROM direction for a pure tailwind.
+1. **Segment geometry.** Computed from the start/end coordinates you give it
+   (auto-filled from the map if you use it) -- distance, and the
+   distance-weighted dominant direction of travel. That gives the ideal
+   wind-FROM direction for a pure tailwind.
 2. **Wind sensitivity.** A heuristic 0-1 score from grade and length: flat,
    long segments are aero/wind dominated; steep, short climbs are
    gravity-dominated and care less about wind. This scales the alert's
@@ -48,9 +59,9 @@ actually safe/dry," which is the useful trigger for going and hunting a KOM.
 
 ## Deploying (Vercel, no CLI needed)
 
-The whole setup -- connecting Strava, wiring up Telegram -- happens from the
-`/settings` page in the running app, from any browser (phone included). You
-only need three things done in the Vercel dashboard first:
+The whole setup -- wiring up Telegram -- happens from the `/settings` page in
+the running app, from any browser (phone included). You only need three
+things done in the Vercel dashboard first:
 
 1. Deploy this project to Vercel (as a new project).
 2. In the project's **Storage** tab, add a **Postgres** database (the Neon
@@ -70,16 +81,16 @@ Then, in the deployed site itself:
 
 5. Open `https://<your-project>.vercel.app/settings` and log in with the
    `ADMIN_PASSWORD` you set.
-6. Create a Strava API app at **strava.com/settings/api**. Set its
-   "Authorization Callback Domain" to your Vercel domain (no `https://`, no
-   trailing slash -- the settings page shows you the exact value). Paste the
-   Client ID and Secret into the Strava card, hit Save, then **Connect to
-   Strava** and authorize.
-7. Message **@BotFather** on Telegram, `/newbot`, paste the token it gives
+6. Message **@BotFather** on Telegram, `/newbot`, paste the token it gives
    you into the Telegram card, hit **Save token**. Send your new bot any
    message (e.g. "hi"), then hit **Find my chat** and pick yourself from the
    list. Use **Send test message** to confirm it reaches you.
-8. Back on the home page, paste a Strava segment URL and hit Track.
+7. Back on the home page, tap **+ Add segment**, optionally paste a Strava
+   segment URL and hit **Autofill**, then drop the start/end pins on the map
+   (or type coordinates) and hit **Track**.
+
+Connecting a Strava API app in `/settings` is still there but entirely
+optional now -- nothing in the add-segment or notification flow needs it.
 
 The home page (segment list, forecasts) has no login and is safe to share --
 it doesn't expose any credentials. Only `/settings` and its API are gated.
@@ -108,7 +119,7 @@ uvicorn app.main:app --reload
 
 Without a `DATABASE_URL` env var it falls back to a local SQLite file, and
 without `VERCEL` set it starts an in-process APScheduler loop instead of
-relying on Vercel Cron. Everything else -- connecting Strava and Telegram --
+relying on Vercel Cron. Everything else -- wiring up Telegram --
 still happens at `http://localhost:8000/settings`.
 
 ## Project layout
@@ -117,20 +128,21 @@ still happens at `http://localhost:8000/settings`.
 api/index.py      Vercel entrypoint (re-exports the FastAPI app)
 vercel.json       Cron schedule, function config
 app/
-  main.py          FastAPI app: segment CRUD, /settings API, OAuth callback, cron endpoint, login
+  main.py          FastAPI app: segment CRUD, city notification toggle, /settings API, OAuth callback, cron endpoint, login
   auth.py          Cookie gate for /settings and its API
-  segments.py       Add-segment flow: parse URL -> fetch from Strava -> geometry -> save
-  strava.py         OAuth authorize/callback + token refresh + segment fetch (DB-backed creds)
+  segments.py       Manual add-segment flow: validate input -> geometry -> save; per-segment summary
+  geo.py            Strava-API-free lookups: public embed-widget scrape for autofill, Open-Meteo/Nominatim geocoding
+  strava.py         OAuth authorize/callback + token refresh (DB-backed creds; optional, unused by add-segment)
   weather.py        Open-Meteo forecast + historical baseline client
   wind.py           Bearing/tailwind/crosswind math, wind-sensitivity heuristic
   analysis.py       Peak-window scoring against the local baseline, ride-window filtering
   telegram.py       Alert formatting, sendMessage, chat discovery (DB-backed creds)
   checker.py        Ties it together per segment; dedupes via the notifications table
   scheduler.py      APScheduler background loop (self-hosted only; unused on Vercel)
-  db.py             SQLAlchemy models: Segment, Notification, AppSettings
+  db.py             SQLAlchemy models: Segment (incl. city), Notification, AppSettings
 static/
-  index.html         Segment list + add form
-  settings.html      Connect Strava / Telegram from the browser (password-gated)
+  index.html         Segment list grouped by city (collapsible, per-city notification toggle) + add-segment form with pin map
+  settings.html      Connect Telegram (and, optionally, Strava) from the browser (password-gated)
   login.html         Password form for /settings
   favicon.ico, favicon.svg, apple-touch-icon.png, icon-192.png, icon-512.png, manifest.webmanifest
                       App icon (a crown, in Strava's brand orange) + PWA manifest

@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="manifest" href="/static/manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -19,10 +20,10 @@
   }
   h1 { font-size: 1.5rem; margin-bottom: 4px; }
   .subtitle { color: #9a9aa4; margin-bottom: 24px; font-size: 0.95rem; }
-  form { display: flex; gap: 8px; margin-bottom: 28px; }
-  input[type=text] {
-    flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #2c2f38;
-    background: #1a1c23; color: #e8e8ea; font-size: 0.95rem;
+  label { display: block; font-size: 0.8rem; color: #9a9aa4; margin: 10px 0 4px; }
+  input[type=text], input[type=number] {
+    width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid #2c2f38;
+    background: #1a1c23; color: #e8e8ea; font-size: 0.92rem;
   }
   button {
     padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer;
@@ -31,6 +32,39 @@
   button.secondary { background: #2c2f38; color: #e8e8ea; }
   button.danger { background: #3a1f1f; color: #ff8a8a; }
   button:disabled { opacity: 0.5; cursor: default; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .add-toggle { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+  .add-panel {
+    background: #171922; border: 1px solid #262933; border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 24px; display: none;
+  }
+  .add-panel.open { display: block; }
+  .add-panel h3 { margin: 0 0 10px; font-size: 1rem; }
+  .help { color: #6b6b76; font-size: 0.8rem; margin-top: 4px; line-height: 1.5; }
+  #pin-map { height: 220px; border-radius: 8px; margin-top: 8px; }
+  .pin-buttons { display: flex; gap: 8px; margin-top: 8px; }
+  .pin-buttons button { flex: 1; padding: 7px 10px; font-size: 0.82rem; }
+  .pin-buttons button.armed { outline: 2px solid #fc5200; }
+  .panel-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .city-group { margin-bottom: 18px; }
+  .city-summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    cursor: pointer; list-style: none; padding: 10px 4px; border-bottom: 1px solid #262933;
+  }
+  .city-summary::-webkit-details-marker { display: none; }
+  .city-summary .city-title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .city-summary .chevron { transition: transform 0.15s; color: #6b6b76; }
+  details[open] > .city-summary .chevron { transform: rotate(90deg); }
+  .city-count { color: #6b6b76; font-weight: 400; font-size: 0.85rem; }
+  .notif-toggle {
+    padding: 5px 10px; font-size: 0.78rem; border-radius: 999px; border: 1px solid #2c2f38;
+    background: #1a1c23; color: #9a9aa4; cursor: pointer;
+  }
+  .notif-toggle.on { background: #1e3324; color: #8fd97f; border-color: #2a4f2a; }
+  .notif-toggle.off { background: #2a1e1e; color: #d98f8f; border-color: #4f2a2a; }
+  .city-body { padding-top: 12px; }
   .card {
     background: #171922; border: 1px solid #262933; border-radius: 12px;
     padding: 16px 18px; margin-bottom: 16px;
@@ -65,17 +99,79 @@
     <h1>🚴 KOM Hunter</h1>
     <a href="/settings" style="color:#7fb2ff; text-decoration:none; font-size:0.9rem; padding-top:4px;">Settings</a>
   </div>
-  <div class="subtitle">Paste a Strava segment link. When the forecast shows a peak, outlier tailwind, you'll get a Telegram ping.</div>
+  <div class="subtitle">Track a segment (no Strava account needed). When the forecast shows a peak, outlier tailwind, you'll get a Telegram ping.</div>
   <div id="setup-banner"></div>
 
-  <form id="add-form">
-    <input type="text" id="url-input" placeholder="https://www.strava.com/segments/12345678" required>
-    <button type="submit" id="add-btn">Track</button>
-  </form>
+  <div class="add-toggle"><button class="secondary" id="add-toggle-btn">+ Add segment</button></div>
+
+  <div class="add-panel" id="add-panel">
+    <h3>Add a segment</h3>
+    <label for="url-input">Strava segment link (optional)</label>
+    <div class="row">
+      <input type="text" id="url-input" placeholder="https://www.strava.com/segments/12345678">
+      <button type="button" class="secondary" id="autofill-btn" style="flex:0 0 auto;">Autofill</button>
+    </div>
+    <div class="help" id="autofill-msg"></div>
+
+    <div class="field-grid">
+      <div>
+        <label for="name-input">Name</label>
+        <input type="text" id="name-input" required>
+      </div>
+      <div>
+        <label for="city-input">City / area (for grouping)</label>
+        <input type="text" id="city-input" placeholder="e.g. Marin Headlands">
+      </div>
+      <div>
+        <label for="distance-input">Distance (mi)</label>
+        <input type="number" step="0.01" id="distance-input">
+      </div>
+      <div>
+        <label for="grade-input">Avg grade (%)</label>
+        <input type="number" step="0.1" id="grade-input">
+      </div>
+      <div>
+        <label for="elevation-input">Elevation gain (m)</label>
+        <input type="number" step="1" id="elevation-input">
+      </div>
+    </div>
+
+    <label>Start &amp; end points (needed to figure out which wind is a tailwind)</label>
+    <div class="pin-buttons">
+      <button type="button" class="secondary" id="pin-start-btn">📍 Set start point</button>
+      <button type="button" class="secondary" id="pin-end-btn">🏁 Set end point</button>
+    </div>
+    <div id="pin-map"></div>
+    <div class="help">Click the map to drop the pin you selected above. You can also type coordinates directly.</div>
+    <div class="field-grid">
+      <div>
+        <label for="start-lat-input">Start latitude</label>
+        <input type="number" step="0.00001" id="start-lat-input">
+      </div>
+      <div>
+        <label for="start-lng-input">Start longitude</label>
+        <input type="number" step="0.00001" id="start-lng-input">
+      </div>
+      <div>
+        <label for="end-lat-input">End latitude</label>
+        <input type="number" step="0.00001" id="end-lat-input">
+      </div>
+      <div>
+        <label for="end-lng-input">End longitude</label>
+        <input type="number" step="0.00001" id="end-lng-input">
+      </div>
+    </div>
+
+    <div class="panel-actions">
+      <button type="button" id="submit-btn">Track</button>
+      <button type="button" class="secondary" id="cancel-btn">Cancel</button>
+    </div>
+  </div>
 
   <div id="error" class="error" style="display:none"></div>
   <div id="list"></div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const listEl = document.getElementById('list');
 const errorEl = document.getElementById('error');
@@ -95,6 +191,155 @@ async function api(path, opts) {
   return resp.json();
 }
 
+// ---- collapsed-city state (persisted per browser) ------------------------
+
+function isCityCollapsed(city) {
+  try {
+    return JSON.parse(localStorage.getItem('komhunter_collapsed_cities') || '{}')[city] === true;
+  } catch { return false; }
+}
+
+function setCityCollapsed(city, collapsed) {
+  try {
+    const state = JSON.parse(localStorage.getItem('komhunter_collapsed_cities') || '{}');
+    state[city] = collapsed;
+    localStorage.setItem('komhunter_collapsed_cities', JSON.stringify(state));
+  } catch { /* non-fatal */ }
+}
+
+// ---- add-segment panel + pin map ------------------------------------------
+
+const addPanel = document.getElementById('add-panel');
+const addToggleBtn = document.getElementById('add-toggle-btn');
+let pinMap = null, startMarker = null, endMarker = null, pinMode = null;
+
+function ensureMap() {
+  if (pinMap) { setTimeout(() => pinMap.invalidateSize(), 0); return; }
+  pinMap = L.map('pin-map').setView([39.5, -98.35], 4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(pinMap);
+  pinMap.on('click', (e) => {
+    if (pinMode === 'start') {
+      setPin('start', e.latlng.lat, e.latlng.lng);
+    } else if (pinMode === 'end') {
+      setPin('end', e.latlng.lat, e.latlng.lng);
+    }
+  });
+}
+
+function setPin(which, lat, lng) {
+  const latInput = document.getElementById(`${which}-lat-input`);
+  const lngInput = document.getElementById(`${which}-lng-input`);
+  latInput.value = lat.toFixed(5);
+  lngInput.value = lng.toFixed(5);
+  const icon = which === 'start' ? '🟢' : '🔴';
+  const marker = which === 'start' ? startMarker : endMarker;
+  if (marker) pinMap.removeLayer(marker);
+  const newMarker = L.marker([lat, lng], {
+    icon: L.divIcon({ html: icon, className: '', iconSize: [20, 20] }),
+  }).addTo(pinMap);
+  if (which === 'start') startMarker = newMarker; else endMarker = newMarker;
+  disarmPins();
+}
+
+function disarmPins() {
+  pinMode = null;
+  document.getElementById('pin-start-btn').classList.remove('armed');
+  document.getElementById('pin-end-btn').classList.remove('armed');
+}
+
+document.getElementById('pin-start-btn').addEventListener('click', () => {
+  pinMode = pinMode === 'start' ? null : 'start';
+  document.getElementById('pin-start-btn').classList.toggle('armed', pinMode === 'start');
+  document.getElementById('pin-end-btn').classList.remove('armed');
+});
+document.getElementById('pin-end-btn').addEventListener('click', () => {
+  pinMode = pinMode === 'end' ? null : 'end';
+  document.getElementById('pin-end-btn').classList.toggle('armed', pinMode === 'end');
+  document.getElementById('pin-start-btn').classList.remove('armed');
+});
+
+function openAddPanel() {
+  addPanel.classList.add('open');
+  addToggleBtn.style.display = 'none';
+  ensureMap();
+}
+
+function closeAddPanel() {
+  addPanel.classList.remove('open');
+  addToggleBtn.style.display = '';
+  disarmPins();
+}
+
+addToggleBtn.addEventListener('click', openAddPanel);
+document.getElementById('cancel-btn').addEventListener('click', closeAddPanel);
+
+document.getElementById('autofill-btn').addEventListener('click', async () => {
+  const url = document.getElementById('url-input').value.trim();
+  const msg = document.getElementById('autofill-msg');
+  if (!url) { msg.textContent = 'Paste a Strava segment link first.'; return; }
+  msg.textContent = 'Looking it up...';
+  try {
+    const data = await api(`/api/segments/lookup?url=${encodeURIComponent(url)}`);
+    if (data.name) document.getElementById('name-input').value = data.name;
+    if (data.city) document.getElementById('city-input').value = data.city;
+    if (data.distance_m) document.getElementById('distance-input').value = (data.distance_m / 1609.34).toFixed(2);
+    if (data.average_grade != null) document.getElementById('grade-input').value = data.average_grade;
+    if (data.elevation_gain_m != null) document.getElementById('elevation-input').value = data.elevation_gain_m;
+    ensureMap();
+    if (data.map_center) {
+      pinMap.setView([data.map_center.lat, data.map_center.lng], 13);
+    }
+    msg.textContent = 'Got the segment\'s stats -- now drop the start/end pins on the map (Strava only shares that with a logged-in session, so this part stays manual).';
+  } catch (e) {
+    msg.textContent = `Couldn't autofill (${e.message}) -- no problem, just fill the form in by hand.`;
+  }
+});
+
+document.getElementById('submit-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('submit-btn');
+  const body = {
+    name: document.getElementById('name-input').value.trim(),
+    url: document.getElementById('url-input').value.trim() || null,
+    city: document.getElementById('city-input').value.trim() || null,
+    start_lat: parseFloat(document.getElementById('start-lat-input').value),
+    start_lng: parseFloat(document.getElementById('start-lng-input').value),
+    end_lat: parseFloat(document.getElementById('end-lat-input').value),
+    end_lng: parseFloat(document.getElementById('end-lng-input').value),
+    distance_m: (() => { const v = parseFloat(document.getElementById('distance-input').value); return isNaN(v) ? null : v * 1609.34; })(),
+    average_grade: (() => { const v = parseFloat(document.getElementById('grade-input').value); return isNaN(v) ? null : v; })(),
+    elevation_gain_m: (() => { const v = parseFloat(document.getElementById('elevation-input').value); return isNaN(v) ? null : v; })(),
+  };
+  if (!body.name) { showError('Segment name is required.'); return; }
+  if ([body.start_lat, body.start_lng, body.end_lat, body.end_lng].some(isNaN)) {
+    showError('Start and end coordinates are required -- drop both pins on the map, or type them in.');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api('/api/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    ['url-input', 'name-input', 'city-input', 'distance-input', 'grade-input', 'elevation-input',
+     'start-lat-input', 'start-lng-input', 'end-lat-input', 'end-lng-input'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('autofill-msg').textContent = '';
+    closeAddPanel();
+    await refresh();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- segment list, grouped by city ----------------------------------------
+
 function fmtWindow(w) {
   const t = new Date(w.time);
   const when = t.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -107,7 +352,7 @@ function segmentCard(s) {
   div.innerHTML = `
     <div class="card-head">
       <div>
-        <h3><a href="${s.url}" target="_blank" rel="noopener">${s.name}</a></h3>
+        <h3><a href="${s.url || '#'}" target="_blank" rel="noopener">${s.name}</a></h3>
         <div class="meta">
           ${s.distance_mi} mi &middot; ${s.average_grade}% avg grade &middot; ${s.elevation_gain_m.toFixed(0)} m gain<br>
           <span class="badge">travels ${s.bearing_compass} (${s.bearing_deg}&deg;)</span>
@@ -123,6 +368,49 @@ function segmentCard(s) {
     <div class="windows" id="windows-${s.id}"><span class="empty">Loading forecast…</span></div>
   `;
   return div;
+}
+
+function groupByCity(segs) {
+  const groups = new Map();
+  for (const s of segs) {
+    const city = s.city || 'Uncategorized';
+    if (!groups.has(city)) groups.set(city, []);
+    groups.get(city).push(s);
+  }
+  return new Map([...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])));
+}
+
+function cityGroupEl(city, segs) {
+  const details = document.createElement('details');
+  details.className = 'city-group';
+  details.open = !isCityCollapsed(city);
+
+  const allOn = segs.every(s => s.active);
+  const summary = document.createElement('summary');
+  summary.className = 'city-summary';
+  summary.innerHTML = `
+    <span class="city-title">
+      <span class="chevron">▸</span>
+      ${city}
+      <span class="city-count">${segs.length} segment${segs.length === 1 ? '' : 's'}</span>
+    </span>
+    <button type="button" class="notif-toggle ${allOn ? 'on' : 'off'}" data-city="${city}">
+      ${allOn ? '🔔 Notifications on' : '🔕 Notifications off'}
+    </button>
+  `;
+  details.appendChild(summary);
+
+  const body = document.createElement('div');
+  body.className = 'city-body';
+  for (const s of segs) {
+    const card = segmentCard(s);
+    body.appendChild(card);
+    loadForecast(s.id);
+  }
+  details.appendChild(body);
+
+  details.addEventListener('toggle', () => setCityCollapsed(city, !details.open));
+  return details;
 }
 
 async function loadForecast(segmentId) {
@@ -143,37 +431,29 @@ async function refresh() {
   const segs = await api('/api/segments');
   listEl.innerHTML = '';
   if (!segs.length) {
-    listEl.innerHTML = '<div class="empty">No segments tracked yet. Paste a link above to get started.</div>';
+    listEl.innerHTML = '<div class="empty">No segments tracked yet. Tap "+ Add segment" to get started.</div>';
     return;
   }
-  for (const s of segs) {
-    const card = segmentCard(s);
-    listEl.appendChild(card);
-    loadForecast(s.id);
+  const groups = groupByCity(segs);
+  for (const [city, citySegs] of groups) {
+    listEl.appendChild(cityGroupEl(city, citySegs));
   }
 }
 
-document.getElementById('add-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const input = document.getElementById('url-input');
-  const btn = document.getElementById('add-btn');
-  btn.disabled = true;
-  try {
-    await api('/api/segments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: input.value }),
-    });
-    input.value = '';
-    await refresh();
-  } catch (e) {
-    showError(e.message);
-  } finally {
-    btn.disabled = false;
-  }
-});
-
 listEl.addEventListener('click', async (e) => {
+  const notifBtn = e.target.closest('button.notif-toggle');
+  if (notifBtn) {
+    e.preventDefault();
+    notifBtn.disabled = true;
+    try {
+      await api(`/api/cities/${encodeURIComponent(notifBtn.dataset.city)}/toggle`, { method: 'POST' });
+      await refresh();
+    } catch (err) {
+      showError(err.message);
+    }
+    return;
+  }
+
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
   const id = btn.dataset.id;
@@ -201,9 +481,8 @@ async function checkSetup() {
   try {
     const s = await api('/api/settings');
     const banner = document.getElementById('setup-banner');
-    if (!s.strava_connected || !s.telegram_connected) {
-      const missing = [!s.strava_connected && 'Strava', !s.telegram_connected && 'Telegram'].filter(Boolean).join(' and ');
-      banner.innerHTML = `<div class="banner">${missing} not connected yet -- head to <a href="/settings">Settings</a> to finish setup before tracking segments.</div>`;
+    if (!s.telegram_connected) {
+      banner.innerHTML = `<div class="banner">Telegram not connected yet -- head to <a href="/settings">Settings</a> so KOM Hunter has somewhere to send alerts.</div>`;
     }
   } catch (e) { /* non-fatal */ }
 }

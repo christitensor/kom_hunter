@@ -9,9 +9,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import analysis, auth, checker, segments, strava, telegram, weather
+from app import analysis, auth, checker, geo, segments, strava, telegram, weather
 from app.config import CRON_SECRET, FORECAST_DAYS, IS_VERCEL
 from app.db import AppSettings, Segment, SessionLocal, get_settings, init_db
+from app.geo import LookupError
+from app.segments import SegmentInputError
 from app.strava import StravaError
 from app.weather import WeatherError
 
@@ -50,7 +52,17 @@ def get_db():
 
 
 class AddSegmentRequest(BaseModel):
-    url: str
+    name: str
+    url: str | None = None
+    city: str | None = None
+    start_lat: float
+    start_lng: float
+    end_lat: float
+    end_lng: float
+    distance_m: float | None = None
+    average_grade: float | None = None
+    max_grade: float | None = None
+    elevation_gain_m: float | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -105,11 +117,26 @@ def list_segments(db: Session = Depends(get_db)):
     return [segments.segment_summary(s) for s in rows]
 
 
+@app.get("/api/segments/lookup")
+def lookup_segment(url: str, db: Session = Depends(get_db)):
+    """Best-effort autofill for the add-segment form from Strava's public
+    (no-login-required) embed widget -- name, place, distance, elevation,
+    grade. Doesn't touch the Strava API, so it works with no connected
+    account. Anything it can't find is just left for the user to type in.
+    """
+    try:
+        data = geo.lookup_public_segment(url)
+    except LookupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    center = geo.geocode_place(data.get("city", "")) if data.get("city") else None
+    return {**data, "map_center": center}
+
+
 @app.post("/api/segments")
 def create_segment(body: AddSegmentRequest, db: Session = Depends(get_db)):
     try:
-        segment = segments.add_segment(db, body.url)
-    except StravaError as e:
+        segment = segments.add_segment_manual(db, body.model_dump())
+    except SegmentInputError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return segments.segment_summary(segment)
 
@@ -132,6 +159,23 @@ def toggle_segment(segment_id: int, db: Session = Depends(get_db)):
     segment.active = not segment.active
     db.commit()
     return segments.segment_summary(segment)
+
+
+@app.post("/api/cities/{city}/toggle")
+def toggle_city(city: str, db: Session = Depends(get_db)):
+    """Turns notifications (the same `active` flag as the per-segment
+    toggle -- inactive segments are neither checked nor alerted on) on or
+    off for every segment in a city at once. If the city's segments are
+    currently in a mixed state, this turns them all on.
+    """
+    rows = db.execute(select(Segment).where(Segment.city == city)).scalars().all()
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No segments in '{city}'")
+    turn_on = not all(s.active for s in rows)
+    for s in rows:
+        s.active = turn_on
+    db.commit()
+    return {"city": city, "active": turn_on, "segments": [segments.segment_summary(s) for s in rows]}
 
 
 @app.get("/api/segments/{segment_id}/forecast")

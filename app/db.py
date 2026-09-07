@@ -1,9 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import create_engine, Boolean, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import create_engine, inspect, text, Boolean, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from app.config import DATABASE_URL, ENGINE_KWARGS
+
+DEFAULT_CITY = "Uncategorized"
 
 
 class Base(DeclarativeBase):
@@ -23,6 +25,10 @@ class Segment(Base):
     maximum_grade: Mapped[float] = mapped_column(Float)
     elevation_gain_m: Mapped[float] = mapped_column(Float)
     climb_category: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Free-text place name (e.g. "Marin Headlands, USA"), used to group the
+    # segment list and to toggle notifications for a whole area at once.
+    city: Mapped[str] = mapped_column(String, default=DEFAULT_CITY)
 
     start_lat: Mapped[float] = mapped_column(Float)
     start_lng: Mapped[float] = mapped_column(Float)
@@ -87,6 +93,25 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _ensure_new_columns()
+
+
+def _ensure_new_columns() -> None:
+    """create_all only creates missing tables, not missing columns on tables
+    that already existed (e.g. the live Postgres DB from before `city` was
+    added). Patch those in with a plain idempotent ALTER TABLE instead of
+    pulling in a full migration framework for one column."""
+    inspector = inspect(engine)
+    if "segments" not in inspector.get_table_names():
+        return
+    existing = {c["name"] for c in inspector.get_columns("segments")}
+    if "city" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(f"ALTER TABLE segments ADD COLUMN city VARCHAR DEFAULT '{DEFAULT_CITY}'")
+        )
+        conn.execute(text(f"UPDATE segments SET city = '{DEFAULT_CITY}' WHERE city IS NULL"))
 
 
 def get_settings(db) -> AppSettings:
