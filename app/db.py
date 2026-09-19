@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import create_engine, inspect, text, Boolean, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import create_engine, inspect, select, text, Boolean, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from app.config import DATABASE_URL, ENGINE_KWARGS
@@ -94,6 +94,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 def init_db() -> None:
     Base.metadata.create_all(engine)
     _ensure_new_columns()
+    _backfill_missing_cities()
 
 
 def _ensure_new_columns() -> None:
@@ -112,6 +113,29 @@ def _ensure_new_columns() -> None:
             text(f"ALTER TABLE segments ADD COLUMN city VARCHAR DEFAULT '{DEFAULT_CITY}'")
         )
         conn.execute(text(f"UPDATE segments SET city = '{DEFAULT_CITY}' WHERE city IS NULL"))
+
+
+def _backfill_missing_cities() -> None:
+    """Segments added before city grouping existed -- or where autofill's
+    reverse-geocoding failed at add-time -- got stuck on DEFAULT_CITY
+    forever, since nothing ever retried them. Take one more pass on every
+    startup at any segment still on the default and try to resolve its city
+    from its already-stored coordinates. Cheap to run repeatedly: a segment
+    that resolves is never touched again, so this only ever does work for
+    the (small, shrinking) set that's still uncategorized.
+    """
+    from app import geo  # deferred: keeps db.py's import graph acyclic
+
+    with SessionLocal() as db:
+        rows = db.execute(select(Segment).where(Segment.city == DEFAULT_CITY)).scalars().all()
+        changed = False
+        for row in rows:
+            city = geo.reverse_geocode_city(row.start_lat, row.start_lng)
+            if city:
+                row.city = city
+                changed = True
+        if changed:
+            db.commit()
 
 
 def get_settings(db) -> AppSettings:

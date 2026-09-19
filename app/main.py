@@ -65,6 +65,10 @@ class AddSegmentRequest(BaseModel):
     elevation_gain_m: float | None = None
 
 
+class RenameCityRequest(BaseModel):
+    new_city: str
+
+
 class SettingsUpdate(BaseModel):
     strava_client_id: str | None = None
     strava_client_secret: str | None = None
@@ -176,6 +180,24 @@ def toggle_city(city: str, db: Session = Depends(get_db)):
         s.active = turn_on
     db.commit()
     return {"city": city, "active": turn_on, "segments": [segments.segment_summary(s) for s in rows]}
+
+
+@app.post("/api/cities/{city}/rename")
+def rename_city(city: str, body: RenameCityRequest, db: Session = Depends(get_db)):
+    """Renames a whole city group at once -- the only way to fix a segment
+    stuck on 'Uncategorized' (or any other name) without deleting and
+    re-adding it, since city is otherwise only set once, at creation.
+    """
+    new_city = body.new_city.strip()
+    if not new_city:
+        raise HTTPException(status_code=400, detail="New city name can't be empty.")
+    rows = db.execute(select(Segment).where(Segment.city == city)).scalars().all()
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No segments in '{city}'")
+    for s in rows:
+        s.city = new_city
+    db.commit()
+    return {"city": new_city, "segments": [segments.segment_summary(s) for s in rows]}
 
 
 @app.get("/api/segments/{segment_id}/forecast")

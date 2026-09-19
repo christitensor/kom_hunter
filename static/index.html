@@ -58,6 +58,8 @@
   .city-summary .chevron { transition: transform 0.15s; color: #6b6b76; }
   details[open] > .city-summary .chevron { transform: rotate(90deg); }
   .city-count { color: #6b6b76; font-weight: 400; font-size: 0.85rem; }
+  .city-actions { display: flex; align-items: center; gap: 6px; }
+  .city-actions button.secondary { padding: 5px 10px; font-size: 0.78rem; border-radius: 999px; }
   .notif-toggle {
     padding: 5px 10px; font-size: 0.78rem; border-radius: 999px; border: 1px solid #2c2f38;
     background: #1a1c23; color: #9a9aa4; cursor: pointer;
@@ -394,9 +396,12 @@ function cityGroupEl(city, segs) {
       ${city}
       <span class="city-count">${segs.length} segment${segs.length === 1 ? '' : 's'}</span>
     </span>
-    <button type="button" class="notif-toggle ${allOn ? 'on' : 'off'}" data-city="${city}">
-      ${allOn ? '🔔 Notifications on' : '🔕 Notifications off'}
-    </button>
+    <span class="city-actions">
+      <button type="button" class="notif-toggle ${allOn ? 'on' : 'off'}" data-city="${city}">
+        ${allOn ? '🔔 Notifications on' : '🔕 Notifications off'}
+      </button>
+      <button type="button" class="secondary city-rename" data-city="${city}" title="Rename this group">✎ Rename</button>
+    </span>
   `;
   details.appendChild(summary);
 
@@ -450,6 +455,28 @@ listEl.addEventListener('click', async (e) => {
       await refresh();
     } catch (err) {
       showError(err.message);
+    }
+    return;
+  }
+
+  const renameBtn = e.target.closest('button.city-rename');
+  if (renameBtn) {
+    e.preventDefault();
+    const city = renameBtn.dataset.city;
+    const newCity = prompt(`Rename "${city}" to:`, city === 'Uncategorized' ? '' : city);
+    if (newCity === null || !newCity.trim() || newCity.trim() === city) return;
+    renameBtn.disabled = true;
+    try {
+      await api(`/api/cities/${encodeURIComponent(city)}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_city: newCity.trim() }),
+      });
+      await refresh();
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      renameBtn.disabled = false;
     }
     return;
   }
