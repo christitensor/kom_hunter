@@ -410,7 +410,7 @@ function cityGroupEl(city, segs) {
   for (const s of segs) {
     const card = segmentCard(s);
     body.appendChild(card);
-    loadForecast(s.id);
+    loadForecast(card.querySelector('.windows'));
   }
   details.appendChild(body);
 
@@ -418,8 +418,10 @@ function cityGroupEl(city, segs) {
   return details;
 }
 
-async function loadForecast(segmentId) {
-  const container = document.getElementById(`windows-${segmentId}`);
+async function loadForecast(container) {
+  // Takes the element directly: cards aren't in the document yet when this is
+  // first called, so a getElementById lookup would return null.
+  const segmentId = container.id.replace('windows-', '');
   try {
     const data = await api(`/api/segments/${segmentId}/forecast`);
     if (!data.peak_windows.length) {
